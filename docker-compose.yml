@@ -1,0 +1,154 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # PostgreSQL Database
+  # ==========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: telegram-monitor-postgres
+    environment:
+      POSTGRES_USER: telegram_monitor
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: telegram_monitor
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - telegram-monitor-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telegram_monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # Redis Cache
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: telegram-monitor-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - telegram-monitor-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # Backend API (FastAPI)
+  # ==========================================
+  backend:
+    build:
+      context: ./backend
+      target: development
+    container_name: telegram-monitor-backend
+    entrypoint: /app/docker-entrypoint.sh
+    command: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+    ports:
+      - "8001:8000"
+    volumes:
+      # Read-only mounts for hot reload
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+      - ./backend/alembic.ini:/app/alembic.ini:ro
+      # Shared session storage
+      - telegram_sessions:/app/sessions
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql://telegram_monitor:dev_password@postgres:5432/telegram_monitor
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - telegram-monitor-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ==========================================
+  # Message Collector Worker
+  # ==========================================
+  worker:
+    build:
+      context: ./backend
+      target: development
+    container_name: telegram-monitor-worker
+    entrypoint: /app/docker-entrypoint.sh
+    command: python -m app.workers
+    volumes:
+      # Read-only mounts for hot reload
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+      - ./backend/alembic.ini:/app/alembic.ini:ro
+      # Shared session storage
+      - telegram_sessions:/app/sessions
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql://telegram_monitor:dev_password@postgres:5432/telegram_monitor
+      - REDIS_URL=redis://redis:6379/0
+      - WORKER_INTERVAL_MINUTES=1
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - telegram-monitor-network
+    restart: unless-stopped
+
+  # ==========================================
+  # Frontend (Next.js)
+  # ==========================================
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    container_name: telegram-monitor-frontend
+    ports:
+      - "3002:3000"
+    volumes:
+      # Mount source code for hot reload
+      - ./frontend:/app
+      # Exclude node_modules and .next (use container's versions)
+      - /app/node_modules
+      - /app/.next
+    env_file:
+      - ./frontend/.env.local
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8001
+    depends_on:
+      - backend
+    networks:
+      - telegram-monitor-network
+
+# ==========================================
+# Volumes
+# ==========================================
+volumes:
+  postgres_data:
+    name: telegram-monitor-postgres-data
+  redis_data:
+    name: telegram-monitor-redis-data
+  telegram_sessions:
+    name: telegram-monitor-sessions
+
+# ==========================================
+# Networks
+# ==========================================
+networks:
+  telegram-monitor-network:
+    name: telegram-monitor-network
+    driver: bridge

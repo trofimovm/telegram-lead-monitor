@@ -1,0 +1,281 @@
+"""
+Telegram Bot Service для отправки уведомлений о новых лидах.
+Использует python-telegram-bot для работы с Bot API.
+"""
+import logging
+import secrets
+from datetime import datetime, timedelta
+from typing import Optional
+from telegram import Bot, Update
+from telegram.ext import Application, CommandHandler, ContextTypes
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.models.user import User
+from app.database import get_session_local
+
+logger = logging.getLogger(__name__)
+
+
+class TelegramBotService:
+    """
+    Сервис для работы с Telegram ботом.
+
+    Функции:
+    - Запуск/остановка бота вместе с backend
+    - Обработка команд /start и /verify
+    - Генерация и проверка кодов верификации
+    - Отправка уведомлений о новых лидах
+    """
+
+    def __init__(self):
+        self.bot: Optional[Bot] = None
+        self.application: Optional[Application] = None
+
+    # === Lifecycle ===
+
+    async def start_bot(self):
+        """Запускает бота при старте backend."""
+        print("=== Starting Telegram bot ===", flush=True)
+        print(f"Bot token present: {bool(settings.TELEGRAM_BOT_TOKEN)}", flush=True)
+        print(f"Bot username: {settings.TELEGRAM_BOT_USERNAME}", flush=True)
+        logger.info("=== Starting Telegram bot ===")
+
+        if not settings.TELEGRAM_BOT_TOKEN:
+            print("TELEGRAM_BOT_TOKEN not set, bot will not start", flush=True)
+            logger.warning("TELEGRAM_BOT_TOKEN not set, bot will not start")
+            return
+
+        try:
+            print("Building application...", flush=True)
+            self.application = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).build()
+
+            # Регистрируем обработчики команд
+            print("Adding command handlers...", flush=True)
+            self.application.add_handler(CommandHandler("start", self._cmd_start))
+            self.application.add_handler(CommandHandler("verify", self._cmd_verify))
+
+            # Инициализируем и запускаем
+            print("Initializing application...", flush=True)
+            await self.application.initialize()
+
+            print("Starting application...", flush=True)
+            await self.application.start()
+
+            print("Starting polling...", flush=True)
+            await self.application.updater.start_polling()
+
+            print("✅ Telegram bot started successfully!", flush=True)
+            logger.info("✅ Telegram bot started successfully!")
+        except Exception as e:
+            print(f"❌ Failed to start Telegram bot: {str(e)}", flush=True)
+            logger.error(f"❌ Failed to start Telegram bot: {str(e)}", exc_info=True)
+
+    async def stop_bot(self):
+        """Останавливает бота при shutdown."""
+        if self.application:
+            try:
+                await self.application.updater.stop()
+                await self.application.stop()
+                await self.application.shutdown()
+                logger.info("Telegram bot stopped")
+            except Exception as e:
+                logger.error(f"Error stopping Telegram bot: {str(e)}", exc_info=True)
+
+    # === Verification ===
+
+    def generate_verification_code(self) -> str:
+        """Генерирует 6-значный буквенно-цифровой код."""
+        return secrets.token_urlsafe(4)[:6].upper()
+
+    def create_verification_code(self, user: User, db: Session) -> str:
+        """
+        Создает и сохраняет код верификации для пользователя.
+
+        Args:
+            user: Пользователь
+            db: Database session
+
+        Returns:
+            Сгенерированный код
+        """
+        code = self.generate_verification_code()
+        user.telegram_verification_code = code
+        user.telegram_verification_expires = datetime.utcnow() + timedelta(minutes=15)
+        db.commit()
+        logger.info(f"Created verification code for user {user.id}")
+        return code
+
+    def verify_code(self, user: User, code: str, chat_id: str, db: Session) -> bool:
+        """
+        Проверяет код верификации и привязывает chat_id к пользователю.
+
+        Args:
+            user: Пользователь
+            code: Код верификации
+            chat_id: Telegram Chat ID
+            db: Database session
+
+        Returns:
+            True если верификация успешна, False иначе
+        """
+        # Проверяем наличие кода
+        if not user.telegram_verification_code:
+            logger.warning(f"User {user.id} has no verification code")
+            return False
+
+        # Проверяем срок действия
+        if user.telegram_verification_expires < datetime.utcnow():
+            logger.warning(f"Verification code expired for user {user.id}")
+            return False
+
+        # Проверяем совпадение
+        if user.telegram_verification_code != code.upper():
+            logger.warning(f"Invalid verification code for user {user.id}")
+            return False
+
+        # Успешная верификация - привязываем chat_id
+        user.telegram_chat_id = chat_id
+        user.telegram_verification_code = None
+        user.telegram_verification_expires = None
+        db.commit()
+
+        logger.info(f"Successfully verified Telegram for user {user.id}, chat_id: {chat_id}")
+        return True
+
+    # === Bot Commands ===
+
+    async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик команды /start."""
+        chat_id = update.effective_chat.id
+
+        message = (
+            "👋 Welcome to Telegram Lead Monitor!\n\n"
+            f"Your Chat ID: {chat_id}\n\n"
+            "To connect your account:\n"
+            "1. Copy your Chat ID above\n"
+            "2. Go to Settings in web app\n"
+            "3. Click 'Connect Telegram Bot' to generate verification code\n"
+            "4. Paste your Chat ID and click 'Verify & Connect'\n"
+            "5. Enable Telegram notifications\n\n"
+            "Or use command: /verify YOUR_CODE"
+        )
+
+        await update.message.reply_text(message)
+        logger.info(f"User started bot, chat_id: {chat_id}")
+
+    async def _cmd_verify(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик команды /verify CODE."""
+        if not context.args:
+            await update.message.reply_text("Usage: /verify YOUR_CODE")
+            return
+
+        code = context.args[0].upper()
+        chat_id = str(update.effective_chat.id)
+
+        # Найти пользователя по коду в БД
+        SessionLocal = get_session_local()
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(
+                User.telegram_verification_code == code,
+                User.telegram_verification_expires > datetime.utcnow()
+            ).first()
+
+            if not user:
+                await update.message.reply_text(
+                    "❌ Invalid or expired code. Generate a new one in Settings."
+                )
+                return
+
+            # Привязать chat_id
+            user.telegram_chat_id = chat_id
+            user.telegram_verification_code = None
+            user.telegram_verification_expires = None
+            db.commit()
+
+            await update.message.reply_text(
+                "✅ Successfully connected!\n\n"
+                "Go to Settings to enable Telegram notifications."
+            )
+            logger.info(f"User {user.id} verified via /verify command, chat_id: {chat_id}")
+
+        except Exception as e:
+            logger.error(f"Error in /verify command: {str(e)}", exc_info=True)
+            await update.message.reply_text(
+                "❌ An error occurred. Please try again or contact support."
+            )
+        finally:
+            db.close()
+
+    # === Send Notifications ===
+
+    async def send_new_lead_notification(
+        self,
+        chat_id: str,
+        lead,
+        rule_name: str,
+        source_title: str,
+        message_preview: str,
+        lead_url: str,
+        message_link: str = ""
+    ):
+        """
+        Отправляет уведомление о новом лиде в Telegram.
+
+        Args:
+            chat_id: Telegram Chat ID пользователя
+            lead: Lead object
+            rule_name: Название сработавшего правила
+            source_title: Название источника
+            message_preview: Превью сообщения
+            lead_url: Ссылка на лид в дашборде
+            message_link: Ссылка на оригинальное сообщение в Telegram
+        """
+        if not self.bot:
+            self.bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+
+        try:
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+            # Форматирование
+            score_percent = int(float(lead.score) * 100)
+            preview = message_preview[:300] + "..." if len(message_preview) > 300 else message_preview
+
+            text = (
+                f"🎯 *New Lead Found!*\n\n"
+                f"*Rule:* {rule_name}\n"
+                f"*Source:* {source_title}\n"
+                f"*Score:* {score_percent}%\n\n"
+                f"*Message Preview:*\n"
+                f"{preview}"
+            )
+
+            # Создать inline кнопки
+            keyboard = [[InlineKeyboardButton("📊 View Lead in Dashboard", url=lead_url)]]
+
+            # Добавить кнопку для оригинального сообщения если ссылка есть
+            if message_link:
+                keyboard.append([InlineKeyboardButton("📨 View Original Message", url=message_link)])
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await self.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode="Markdown",
+                reply_markup=reply_markup,
+                disable_web_page_preview=True
+            )
+
+            logger.info(f"Sent Telegram notification to chat_id {chat_id} for lead {lead.id}")
+
+        except Exception as e:
+            logger.error(
+                f"Failed to send Telegram notification to chat_id {chat_id}: {str(e)}",
+                exc_info=True
+            )
+
+
+# Глобальный экземпляр
+telegram_bot_service = TelegramBotService()

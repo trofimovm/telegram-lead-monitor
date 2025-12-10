@@ -5,6 +5,7 @@ import {
   LeadUpdate,
   LeadStats,
   LeadListParams,
+  LeadListResponse,
 } from './lead-types';
 
 /**
@@ -14,7 +15,7 @@ export const leadsApi = {
   /**
    * Получить список лидов с фильтрацией и пагинацией
    */
-  listLeads: async (params?: LeadListParams): Promise<LeadResponse[]> => {
+  listLeads: async (params?: LeadListParams): Promise<LeadListResponse> => {
     // Формируем query parameters
     const queryParams: Record<string, any> = {};
 
@@ -46,7 +47,7 @@ export const leadsApi = {
       queryParams.limit = params.limit;
     }
 
-    return apiClient.get<LeadResponse[]>('/leads', { params: queryParams });
+    return apiClient.get<LeadListResponse>('/leads', { params: queryParams });
   },
 
   /**

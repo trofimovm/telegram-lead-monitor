@@ -223,6 +223,8 @@ export interface Translations {
     matchedRule: string;
     openInTelegram: string;
     deleteConfirm: string;
+    totalLeads: string;
+    foundLeads: string;
   };
 
   // Rules
@@ -659,6 +661,8 @@ export const translations: Record<Language, Translations> = {
       matchedRule: 'Matched Rule',
       openInTelegram: 'Open in Telegram',
       deleteConfirm: 'Are you sure you want to delete this lead?',
+      totalLeads: 'Total Leads',
+      foundLeads: 'Found',
     },
     rules: {
       title: 'Monitoring Rules',
@@ -1097,6 +1101,8 @@ export const translations: Record<Language, Translations> = {
       matchedRule: 'Совпавшее правило',
       openInTelegram: 'Открыть в Telegram',
       deleteConfirm: 'Вы уверены, что хотите удалить этот лид?',
+      totalLeads: 'Всего лидов',
+      foundLeads: 'Найдено',
     },
     rules: {
       title: 'Правила мониторинга',

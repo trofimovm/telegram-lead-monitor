@@ -109,6 +109,14 @@ export interface LeadListParams extends LeadListFilters {
 }
 
 /**
+ * Ответ API со списком лидов и общим количеством
+ */
+export interface LeadListResponse {
+  leads: LeadResponse[];
+  total: number;
+}
+
+/**
  * Статистика по лидам
  */
 export interface LeadStats {

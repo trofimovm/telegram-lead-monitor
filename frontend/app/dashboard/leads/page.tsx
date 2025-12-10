@@ -26,6 +26,7 @@ export default function LeadsPage() {
 
   // State для списка лидов
   const [leads, setLeads] = useState<LeadResponse[]>([]);
+  const [totalLeads, setTotalLeads] = useState(0);
   const [rules, setRules] = useState<RuleResponse[]>([]);
   const [subscriptions, setSubscriptions] = useState<SubscriptionResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,6 +74,20 @@ export default function LeadsPage() {
     }
   }, [searchParams, leads]);
 
+  // Close modal on Escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showDetailModal) {
+        setShowDetailModal(false);
+      }
+    };
+
+    if (showDetailModal) {
+      document.addEventListener('keydown', handleEscape);
+      return () => document.removeEventListener('keydown', handleEscape);
+    }
+  }, [showDetailModal]);
+
   const loadRulesAndSubscriptions = async () => {
     try {
       const [rulesData, subscriptionsData] = await Promise.all([
@@ -107,8 +122,9 @@ export default function LeadsPage() {
       }
 
       const data = await leadsApi.listLeads(params);
-      setLeads(data);
-      setHasMore(data.length === limit);
+      setLeads(data.leads);
+      setTotalLeads(data.total);
+      setHasMore(data.leads.length === limit);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load leads');
     } finally {
@@ -241,6 +257,49 @@ export default function LeadsPage() {
     setSkip(skip + limit);
   };
 
+  const goToPage = (page: number) => {
+    setSkip((page - 1) * limit);
+  };
+
+  const getCurrentPage = () => Math.floor(skip / limit) + 1;
+  const getTotalPages = () => Math.ceil(totalLeads / limit);
+
+  const getPageNumbers = () => {
+    const totalPages = getTotalPages();
+    const currentPage = getCurrentPage();
+    const pages: (number | string)[] = [];
+
+    if (totalPages <= 7) {
+      // Show all pages if 7 or less
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      // Always show first page
+      pages.push(1);
+
+      if (currentPage > 3) {
+        pages.push('...');
+      }
+
+      // Show pages around current
+      const start = Math.max(2, currentPage - 1);
+      const end = Math.min(totalPages - 1, currentPage + 1);
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+
+      if (currentPage < totalPages - 2) {
+        pages.push('...');
+      }
+
+      // Always show last page
+      pages.push(totalPages);
+    }
+
+    return pages;
+  };
+
   const getRuleName = (ruleId: string) => {
     const rule = rules.find(r => r.id === ruleId);
     return rule?.name || 'Unknown Rule';
@@ -261,11 +320,25 @@ export default function LeadsPage() {
     <ProtectedRoute>
       <DashboardLayout>
         <div className="space-y-6">
-          <div>
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-white">{t.leads.title}</h2>
-            <p className="text-gray-600 dark:text-gray-400 mt-2">
-              {t.leads.subtitle}
-            </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-3xl font-bold text-gray-900 dark:text-white">{t.leads.title}</h2>
+              <p className="text-gray-600 dark:text-gray-400 mt-2">
+                {t.leads.subtitle}
+              </p>
+            </div>
+            {!loading && (
+              <div className="text-right">
+                <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                  {totalLeads}
+                </div>
+                <div className="text-sm text-gray-500 dark:text-gray-400">
+                  {statusFilter === 'all' && ruleFilter === 'all' && channelFilter === 'all'
+                    ? t.leads.totalLeads || 'Total Leads'
+                    : t.leads.foundLeads || 'Found'}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Фильтры */}
@@ -469,37 +542,73 @@ export default function LeadsPage() {
               ))}
 
               {/* Пагинация */}
-              <div className="flex items-center justify-between pt-4">
-                <div className="text-sm text-gray-600 dark:text-gray-400">
-                  {t.leads.showing} {skip + 1} - {skip + leads.length}
+              {totalLeads > 0 && (
+                <div className="flex items-center justify-between pt-4">
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    {t.leads.showing} {skip + 1} - {Math.min(skip + limit, totalLeads)} of {totalLeads}
+                  </div>
+                  <div className="flex gap-1">
+                    {/* Previous Button */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handlePrevPage}
+                      disabled={skip === 0}
+                    >
+                      ‹
+                    </Button>
+
+                    {/* Page Numbers */}
+                    {getPageNumbers().map((page, idx) => (
+                      page === '...' ? (
+                        <span key={`ellipsis-${idx}`} className="px-3 py-1 text-gray-400">...</span>
+                      ) : (
+                        <Button
+                          key={page}
+                          variant={getCurrentPage() === page ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => goToPage(page as number)}
+                        >
+                          {page}
+                        </Button>
+                      )
+                    ))}
+
+                    {/* Next Button */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleNextPage}
+                      disabled={getCurrentPage() >= getTotalPages()}
+                    >
+                      ›
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handlePrevPage}
-                    disabled={skip === 0}
-                  >
-                    {t.leads.previous}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleNextPage}
-                    disabled={!hasMore}
-                  >
-                    {t.leads.next}
-                  </Button>
-                </div>
-              </div>
+              )}
             </div>
           )}
 
           {/* Lead Detail Modal */}
           {showDetailModal && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-              <Card className="w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-                <CardHeader>
+            <div
+              className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+              onClick={() => setShowDetailModal(false)}
+            >
+              <Card
+                className="w-full max-w-4xl max-h-[90vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <CardHeader className="relative">
+                  <button
+                    onClick={() => setShowDetailModal(false)}
+                    className="absolute right-4 top-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                    aria-label="Close"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                   <CardTitle>{t.leads.leadDetails}</CardTitle>
                   <CardDescription>
                     {t.leads.completeInformation}

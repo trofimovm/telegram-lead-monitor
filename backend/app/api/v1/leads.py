@@ -26,13 +26,14 @@ from app.schemas.lead import (
     LeadWithDetails,
     LeadStatus,
     LeadStats,
+    LeadListResponse,
 )
 from app.services.notification_service import notification_service
 
 router = APIRouter()
 
 
-@router.get("", response_model=List[LeadResponse])
+@router.get("", response_model=LeadListResponse)
 async def list_leads(
     # Фильтры
     status_filter: Optional[LeadStatus] = Query(None, alias="status"),
@@ -65,6 +66,8 @@ async def list_leads(
     **Пагинация:**
     - **skip**: Количество пропускаемых записей (default: 0)
     - **limit**: Максимальное количество записей (default: 50, max: 100)
+
+    **Возвращает:** Объект с полями `leads` (массив лидов) и `total` (общее количество с учетом фильтров)
     """
     query = db.query(Lead).filter(Lead.tenant_id == current_tenant.id)
 
@@ -93,10 +96,16 @@ async def list_leads(
             GlobalMessage.channel_id == channel_id
         )
 
+    # Получаем общее количество (ДО пагинации)
+    total = query.count()
+
     # Сортировка и пагинация
     leads = query.order_by(desc(Lead.created_at)).offset(skip).limit(limit).all()
 
-    return [LeadResponse.model_validate(lead) for lead in leads]
+    return LeadListResponse(
+        leads=[LeadResponse.model_validate(lead) for lead in leads],
+        total=total
+    )
 
 
 @router.get("/stats", response_model=LeadStats)

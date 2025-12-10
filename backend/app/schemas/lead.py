@@ -87,6 +87,12 @@ class LeadListFilters(BaseModel):
     search: Optional[str] = Field(None, description="Поиск по тексту сообщения")
 
 
+class LeadListResponse(BaseModel):
+    """Ответ со списком лидов и общим количеством."""
+    leads: list[LeadResponse] = Field(..., description="Список лидов")
+    total: int = Field(..., description="Общее количество лидов (с учетом фильтров)")
+
+
 class LeadStats(BaseModel):
     """Статистика по лидам."""
     total: int = Field(..., description="Всего лидов")

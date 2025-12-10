@@ -417,7 +417,7 @@ export interface Translations {
   // Lead Status (from API)
   leadStatus: {
     new: string;
-    inProgress: string;
+    in_progress: string;
     processed: string;
     archived: string;
   };
@@ -843,7 +843,7 @@ export const translations: Record<Language, Translations> = {
     },
     leadStatus: {
       new: 'New',
-      inProgress: 'In Progress',
+      in_progress: 'In Progress',
       processed: 'Processed',
       archived: 'Archived',
     },
@@ -1283,7 +1283,7 @@ export const translations: Record<Language, Translations> = {
     },
     leadStatus: {
       new: 'Новый',
-      inProgress: 'В работе',
+      in_progress: 'В работе',
       processed: 'Обработан',
       archived: 'Архив',
     },

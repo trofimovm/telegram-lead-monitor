@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: tgcatch
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      # ⚠️ CRITICAL: Init Container для migrations
+      initContainers:
+        - name: db-migrate
+          image: cr.yandex/crpf742dk953m6aqk69s/tgcatch-backend:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Running database migrations..."
+              cd /app
+              alembic upgrade head
+              echo "Migrations completed!"
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: DATABASE_URL
+
+      containers:
+        - name: backend
+          image: cr.yandex/crpf742dk953m6aqk69s/tgcatch-backend:latest
+          ports:
+            - containerPort: 8000
+
+          envFrom:
+            - configMapRef:
+                name: backend-config
+
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: SECRET_KEY
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: ENCRYPTION_KEY
+            - name: TELEGRAM_API_ID
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: TELEGRAM_API_ID
+            - name: TELEGRAM_API_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: TELEGRAM_API_HASH
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: TELEGRAM_BOT_TOKEN
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: LLM_API_KEY
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              value: "redis://$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+            - name: SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: SMTP_USER
+                  optional: true
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: SMTP_PASSWORD
+                  optional: true
+
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+
+          volumeMounts:
+            - name: telegram-sessions
+              mountPath: /app/sessions
+
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+      volumes:
+        - name: telegram-sessions
+          persistentVolumeClaim:
+            claimName: telegram-sessions-pvc

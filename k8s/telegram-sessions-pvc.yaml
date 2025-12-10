@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: telegram-sessions-pvc
+  namespace: tgcatch
+spec:
+  accessModes:
+    - ReadWriteMany  # ⚠️ CRITICAL: Shared между backend и worker!
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: yc-network-hdd

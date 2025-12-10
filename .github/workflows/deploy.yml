@@ -1,0 +1,169 @@
+name: Deploy to Yandex Cloud
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  YC_REGISTRY: cr.yandex/crpf742dk953m6aqk69s
+  K8S_NAMESPACE: tgcatch
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure Yandex Cloud CLI
+        run: |
+          curl https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+          echo "$HOME/yandex-cloud/bin" >> $GITHUB_PATH
+
+      - name: Authenticate to Yandex Cloud
+        env:
+          YC_TOKEN: ${{ secrets.YC_TOKEN }}
+        run: |
+          yc config set token $YC_TOKEN
+          yc config set cloud-id ${{ secrets.YC_CLOUD_ID }}
+          yc config set folder-id ${{ secrets.YC_FOLDER_ID }}
+
+      - name: Configure Docker for Yandex Container Registry
+        run: |
+          yc container registry configure-docker
+
+      - name: Build and push Backend image
+        run: |
+          docker build \
+            --target production \
+            -t ${{ env.YC_REGISTRY }}/tgcatch-backend:latest \
+            -t ${{ env.YC_REGISTRY }}/tgcatch-backend:${{ github.sha }} \
+            -f backend/Dockerfile \
+            backend/
+          docker push ${{ env.YC_REGISTRY }}/tgcatch-backend:latest
+          docker push ${{ env.YC_REGISTRY }}/tgcatch-backend:${{ github.sha }}
+
+      - name: Build and push Frontend image
+        run: |
+          docker build \
+            --target production \
+            --build-arg NEXT_PUBLIC_API_URL=/api \
+            -t ${{ env.YC_REGISTRY }}/tgcatch-frontend:latest \
+            -t ${{ env.YC_REGISTRY }}/tgcatch-frontend:${{ github.sha }} \
+            -f frontend/Dockerfile \
+            frontend/
+          docker push ${{ env.YC_REGISTRY }}/tgcatch-frontend:latest
+          docker push ${{ env.YC_REGISTRY }}/tgcatch-frontend:${{ github.sha }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubectl
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG_DATA }}
+        run: |
+          mkdir -p $HOME/.kube
+          echo "$KUBE_CONFIG" | base64 -d > $HOME/.kube/config
+          kubectl config use-context yc-vibe-k8s-cluster
+          kubectl config set-context --current --namespace=${{ env.K8S_NAMESPACE }}
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace ${{ env.K8S_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply ConfigMaps
+        run: |
+          kubectl apply -f k8s/backend-configmap.yaml
+          kubectl apply -f k8s/frontend-configmap.yaml
+
+      - name: Create/Update Secrets
+        env:
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          kubectl create secret generic backend-secrets \
+            --from-literal=SECRET_KEY="$SECRET_KEY" \
+            --from-literal=ENCRYPTION_KEY="$ENCRYPTION_KEY" \
+            --from-literal=TELEGRAM_API_ID="$TELEGRAM_API_ID" \
+            --from-literal=TELEGRAM_API_HASH="$TELEGRAM_API_HASH" \
+            --from-literal=TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" \
+            --from-literal=LLM_API_KEY="$LLM_API_KEY" \
+            --from-literal=DATABASE_URL="$DATABASE_URL" \
+            --from-literal=SMTP_USER="$SMTP_USER" \
+            --from-literal=SMTP_PASSWORD="$SMTP_PASSWORD" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply PVCs
+        run: |
+          kubectl apply -f k8s/telegram-sessions-pvc.yaml
+          kubectl apply -f k8s/redis-pvc.yaml
+
+      - name: Wait for PVCs to bind
+        run: |
+          kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/telegram-sessions-pvc --timeout=60s || true
+          kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/redis-data-pvc --timeout=60s || true
+
+      - name: Deploy Redis
+        run: |
+          kubectl apply -f k8s/redis-deployment.yaml
+          kubectl apply -f k8s/redis-service.yaml
+          kubectl wait --for=condition=available --timeout=60s deployment/redis || true
+
+      - name: Deploy Backend
+        run: |
+          kubectl apply -f k8s/backend-deployment.yaml
+          kubectl apply -f k8s/backend-service.yaml
+          kubectl wait --for=condition=available --timeout=120s deployment/backend || true
+
+      - name: Deploy Worker
+        run: |
+          kubectl apply -f k8s/worker-deployment.yaml
+
+      - name: Deploy Frontend
+        run: |
+          kubectl apply -f k8s/frontend-deployment.yaml
+          kubectl apply -f k8s/frontend-service.yaml
+          kubectl wait --for=condition=available --timeout=60s deployment/frontend || true
+
+      - name: Apply Ingress
+        run: |
+          kubectl apply -f k8s/ingress.yaml
+
+      - name: Get Deployment Status
+        run: |
+          echo "=== Deployments ==="
+          kubectl get deployments
+          echo ""
+          echo "=== Pods ==="
+          kubectl get pods
+          echo ""
+          echo "=== Services ==="
+          kubectl get services
+          echo ""
+          echo "=== Ingress ==="
+          kubectl get ingress
+
+      - name: Check Pod Logs (if failed)
+        if: failure()
+        run: |
+          echo "=== Backend Logs ==="
+          kubectl logs -l app=backend --tail=50 --all-containers || true
+          echo ""
+          echo "=== Worker Logs ==="
+          kubectl logs -l app=worker --tail=50 || true
+          echo ""
+          echo "=== Frontend Logs ==="
+          kubectl logs -l app=frontend --tail=50 || true

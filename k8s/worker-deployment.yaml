@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: tgcatch
+spec:
+  replicas: 1  # ⚠️ MUST be singleton!
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: cr.yandex/crpf742dk953m6aqk69s/tgcatch-backend:latest
+
+          # ⚠️ CRITICAL: Override command
+          command: ["python", "-m", "app.workers"]
+
+          envFrom:
+            - configMapRef:
+                name: backend-config
+
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: SECRET_KEY
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: ENCRYPTION_KEY
+            - name: TELEGRAM_API_ID
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: TELEGRAM_API_ID
+            - name: TELEGRAM_API_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: TELEGRAM_API_HASH
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: LLM_API_KEY
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              value: "redis://$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          volumeMounts:
+            - name: telegram-sessions
+              mountPath: /app/sessions
+
+      volumes:
+        - name: telegram-sessions
+          persistentVolumeClaim:
+            claimName: telegram-sessions-pvc

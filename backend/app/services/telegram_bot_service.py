@@ -68,29 +68,47 @@ class TelegramBotService:
             print("Initializing application...", flush=True)
             await self.application.initialize()
 
-            # Register webhook
+            # Register webhook (non-critical - may already be set by another replica)
             webhook_url = f"{settings.BACKEND_PUBLIC_URL}/api/v1/telegram/webhook"
 
-            print(f"Registering webhook: {webhook_url}", flush=True)
+            try:
+                print(f"Registering webhook: {webhook_url}", flush=True)
 
-            success = await self.bot.set_webhook(
-                url=webhook_url,
-                allowed_updates=["message", "callback_query"],
-                drop_pending_updates=True,  # Clear old updates
-                secret_token=settings.TELEGRAM_WEBHOOK_SECRET
-            )
+                success = await self.bot.set_webhook(
+                    url=webhook_url,
+                    allowed_updates=["message", "callback_query"],
+                    drop_pending_updates=True,  # Clear old updates
+                    secret_token=settings.TELEGRAM_WEBHOOK_SECRET
+                )
 
-            if success:
-                print("✅ Telegram webhook registered!", flush=True)
-                logger.info("Webhook registered successfully")
+                if success:
+                    print("✅ Telegram webhook registered!", flush=True)
+                    logger.info("Webhook registered successfully")
 
-                # Verify
-                webhook_info = await self.bot.get_webhook_info()
-                print(f"Webhook URL: {webhook_info.url}", flush=True)
-                logger.info(f"Webhook info: {webhook_info}")
-            else:
-                print("❌ Failed to register webhook", flush=True)
-                logger.error("Webhook registration failed")
+                    # Verify
+                    webhook_info = await self.bot.get_webhook_info()
+                    print(f"Webhook URL: {webhook_info.url}", flush=True)
+                    logger.info(f"Webhook info: {webhook_info}")
+                else:
+                    print("⚠️ Webhook registration returned false (may already be set)", flush=True)
+                    logger.warning("Webhook registration returned false")
+
+            except Exception as webhook_error:
+                # Don't crash on webhook errors - it may already be registered by another replica
+                print(f"⚠️ Webhook registration failed (non-critical): {webhook_error}", flush=True)
+                logger.warning(f"Webhook registration failed (non-critical): {webhook_error}")
+
+                # Try to get current webhook info to verify it's set
+                try:
+                    webhook_info = await self.bot.get_webhook_info()
+                    if webhook_info.url:
+                        print(f"✅ Webhook already registered: {webhook_info.url}", flush=True)
+                        logger.info(f"Webhook already registered: {webhook_info.url}")
+                    else:
+                        print(f"⚠️ No webhook currently registered", flush=True)
+                        logger.warning("No webhook currently registered")
+                except Exception as info_error:
+                    logger.warning(f"Could not retrieve webhook info: {info_error}")
 
         except Exception as e:
             print(f"❌ Bot init failed: {str(e)}", flush=True)

@@ -5,7 +5,7 @@ metadata:
   namespace: tgcatch
 spec:
   accessModes:
-    - ReadWriteMany  # ⚠️ CRITICAL: Shared между backend и worker!
+    - ReadWriteOnce
   resources:
     requests:
       storage: 1Gi

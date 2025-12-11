@@ -53,7 +53,7 @@ jobs:
         run: |
           docker build \
             --target production \
-            --build-arg NEXT_PUBLIC_API_URL=/api \
+            --build-arg NEXT_PUBLIC_API_URL="" \
             -t ${{ env.YC_REGISTRY }}/tgcatch-frontend:latest \
             -t ${{ env.YC_REGISTRY }}/tgcatch-frontend:${{ github.sha }} \
             -f frontend/Dockerfile \

@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
+import logging
 
 from app.models.user import User
 from app.models.tenant import Tenant
@@ -17,6 +18,8 @@ from app.utils.security import (
 )
 from app.services.email_service import email_service
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -76,8 +79,10 @@ class AuthService:
         db.commit()
         db.refresh(user)
 
-        # Send verification email
-        await email_service.send_verification_email(user.email, verification_token)
+        # TEMPORARILY DISABLED: Send verification email
+        # Uncomment after configuring SMTP credentials in .env
+        # await email_service.send_verification_email(user.email, verification_token)
+        logger.info(f"Email verification disabled - user {user.email} registered without verification")
 
         return UserResponse.model_validate(user)
 

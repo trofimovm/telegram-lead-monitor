@@ -35,52 +35,98 @@ class TelegramBotService:
     # === Lifecycle ===
 
     async def start_bot(self):
-        """Запускает бота при старте backend."""
-        print("=== Starting Telegram bot ===", flush=True)
-        print(f"Bot token present: {bool(settings.TELEGRAM_BOT_TOKEN)}", flush=True)
-        print(f"Bot username: {settings.TELEGRAM_BOT_USERNAME}", flush=True)
-        logger.info("=== Starting Telegram bot ===")
+        """
+        Initialize bot and register webhook.
+        NON-BLOCKING, IDEMPOTENT operation.
+        """
+        print("=== Initializing Telegram bot (webhook mode) ===", flush=True)
+        logger.info("Initializing Telegram bot (webhook mode)")
 
         if not settings.TELEGRAM_BOT_TOKEN:
             print("TELEGRAM_BOT_TOKEN not set, bot will not start", flush=True)
-            logger.warning("TELEGRAM_BOT_TOKEN not set, bot will not start")
+            logger.warning("TELEGRAM_BOT_TOKEN not set")
             return
 
         try:
-            print("Building application...", flush=True)
-            self.application = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).build()
+            # Create bot
+            self.bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
 
-            # Регистрируем обработчики команд
+            # Build application (NO UPDATER!)
+            self.application = (
+                Application.builder()
+                .token(settings.TELEGRAM_BOT_TOKEN)
+                .build()
+            )
+
+            # Add command handlers
+            from telegram.ext import CommandHandler
             print("Adding command handlers...", flush=True)
             self.application.add_handler(CommandHandler("start", self._cmd_start))
             self.application.add_handler(CommandHandler("verify", self._cmd_verify))
 
-            # Инициализируем и запускаем
+            # Initialize (creates bot, handlers, etc.)
             print("Initializing application...", flush=True)
             await self.application.initialize()
 
-            print("Starting application...", flush=True)
-            await self.application.start()
+            # Register webhook
+            webhook_url = f"{settings.BACKEND_PUBLIC_URL}/api/v1/telegram/webhook"
 
-            print("Starting polling...", flush=True)
-            await self.application.updater.start_polling()
+            print(f"Registering webhook: {webhook_url}", flush=True)
 
-            print("✅ Telegram bot started successfully!", flush=True)
-            logger.info("✅ Telegram bot started successfully!")
+            success = await self.bot.set_webhook(
+                url=webhook_url,
+                allowed_updates=["message", "callback_query"],
+                drop_pending_updates=True,  # Clear old updates
+                secret_token=settings.TELEGRAM_WEBHOOK_SECRET
+            )
+
+            if success:
+                print("✅ Telegram webhook registered!", flush=True)
+                logger.info("Webhook registered successfully")
+
+                # Verify
+                webhook_info = await self.bot.get_webhook_info()
+                print(f"Webhook URL: {webhook_info.url}", flush=True)
+                logger.info(f"Webhook info: {webhook_info}")
+            else:
+                print("❌ Failed to register webhook", flush=True)
+                logger.error("Webhook registration failed")
+
         except Exception as e:
-            print(f"❌ Failed to start Telegram bot: {str(e)}", flush=True)
-            logger.error(f"❌ Failed to start Telegram bot: {str(e)}", exc_info=True)
+            print(f"❌ Bot init failed: {str(e)}", flush=True)
+            logger.error(f"Bot init failed: {e}", exc_info=True)
 
     async def stop_bot(self):
-        """Останавливает бота при shutdown."""
+        """
+        Delete webhook and cleanup.
+        IDEMPOTENT operation.
+        """
+        print("=== Stopping Telegram bot ===", flush=True)
+
+        if self.bot:
+            try:
+                await self.bot.delete_webhook(drop_pending_updates=True)
+                print("✅ Webhook deleted", flush=True)
+                logger.info("Webhook deleted")
+            except Exception as e:
+                logger.error(f"Error deleting webhook: {e}", exc_info=True)
+
         if self.application:
             try:
-                await self.application.updater.stop()
-                await self.application.stop()
                 await self.application.shutdown()
-                logger.info("Telegram bot stopped")
+                logger.info("Application shutdown")
             except Exception as e:
-                logger.error(f"Error stopping Telegram bot: {str(e)}", exc_info=True)
+                logger.error(f"Shutdown error: {e}", exc_info=True)
+
+    async def process_update(self, update: Update):
+        """
+        Process incoming update from webhook.
+        Called by webhook endpoint for each Telegram update.
+        """
+        try:
+            await self.application.process_update(update)
+        except Exception as e:
+            logger.error(f"Error processing update: {e}", exc_info=True)
 
     # === Verification ===
 

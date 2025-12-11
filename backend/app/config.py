@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_BOT_USERNAME: str = ""
 
+    # Telegram Bot Webhook configuration
+    BACKEND_PUBLIC_URL: str = "https://tgcatch.ru"
+    TELEGRAM_WEBHOOK_SECRET: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

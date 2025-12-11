@@ -4,7 +4,7 @@ metadata:
   name: backend
   namespace: tgcatch
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: backend
@@ -91,6 +91,13 @@ spec:
                   name: backend-secrets
                   key: SMTP_PASSWORD
                   optional: true
+            - name: BACKEND_PUBLIC_URL
+              value: "https://tgcatch.ru"
+            - name: TELEGRAM_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: TELEGRAM_WEBHOOK_SECRET
 
           resources:
             requests:

@@ -92,7 +92,7 @@ async def trigger_message_collection():
 
 
 # Include API routes
-from app.api.v1 import auth, telegram, subscriptions, rules, leads, notifications, users, analytics
+from app.api.v1 import auth, telegram, subscriptions, rules, leads, notifications, users, analytics, telegram_webhook
 from app.api.internal import telegram as internal_telegram
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
@@ -103,6 +103,7 @@ app.include_router(leads.router, prefix="/api/v1/leads", tags=["leads"])
 app.include_router(notifications.router, prefix="/api/v1", tags=["notifications"])
 app.include_router(users.router, prefix="/api/v1", tags=["users"])
 app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytics"])
+app.include_router(telegram_webhook.router, prefix="/api/v1", tags=["telegram"])
 
 # Internal API (for inter-service communication)
 app.include_router(internal_telegram.router, prefix="/api/internal/telegram", tags=["internal"])

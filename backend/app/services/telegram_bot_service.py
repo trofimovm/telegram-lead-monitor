@@ -48,9 +48,6 @@ class TelegramBotService:
             return
 
         try:
-            # Create bot
-            self.bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
-
             # Build application (NO UPDATER!)
             self.application = (
                 Application.builder()
@@ -67,6 +64,9 @@ class TelegramBotService:
             # Initialize (creates bot, handlers, etc.)
             print("Initializing application...", flush=True)
             await self.application.initialize()
+
+            # Use the initialized bot from application
+            self.bot = self.application.bot
 
             # Register webhook (non-critical - may already be set by another replica)
             webhook_url = f"{settings.BACKEND_PUBLIC_URL}/api/v1/telegram/webhook"

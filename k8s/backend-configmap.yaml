@@ -47,3 +47,6 @@ data:
 
   # Backend URL (для Worker → Backend HTTP)
   BACKEND_URL: "http://backend-svc:8000"
+
+  # Telegram Bot
+  TELEGRAM_BOT_USERNAME: "@tg_lead_notify_bot"

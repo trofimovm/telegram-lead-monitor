@@ -116,23 +116,26 @@ class TelegramBotService:
 
     async def stop_bot(self):
         """
-        Delete webhook and cleanup.
-        IDEMPOTENT operation.
-        """
-        print("=== Stopping Telegram bot ===", flush=True)
+        Cleanup bot resources WITHOUT deleting webhook.
 
-        if self.bot:
-            try:
-                await self.bot.delete_webhook(drop_pending_updates=True)
-                print("✅ Webhook deleted", flush=True)
-                logger.info("Webhook deleted")
-            except Exception as e:
-                logger.error(f"Error deleting webhook: {e}", exc_info=True)
+        IMPORTANT: Do NOT delete webhook on shutdown!
+        In multi-replica deployment, deleting webhook on one pod shutdown
+        breaks the webhook for all other pods.
+
+        Webhook persists until explicitly deleted or replaced.
+        """
+        print("=== Stopping Telegram bot (keeping webhook) ===", flush=True)
+        logger.info("Stopping Telegram bot (keeping webhook)")
+
+        # NOTE: We intentionally do NOT delete the webhook here.
+        # In K8s with multiple replicas, deleting webhook on one pod's shutdown
+        # would break the bot for all other pods.
 
         if self.application:
             try:
                 await self.application.shutdown()
-                logger.info("Application shutdown")
+                print("✅ Application shutdown complete", flush=True)
+                logger.info("Application shutdown complete")
             except Exception as e:
                 logger.error(f"Shutdown error: {e}", exc_info=True)
 

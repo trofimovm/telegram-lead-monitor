@@ -70,7 +70,7 @@ class AuthService:
             password_hash=get_password_hash(user_data.password),
             full_name=user_data.full_name,
             role="owner",  # First user in tenant is owner
-            email_verified=False,
+            email_verified=True,  # TEMPORARILY TRUE - email verification disabled
             verification_token=verification_token,
             verification_token_expires=verification_expires,
         )
@@ -109,12 +109,13 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Check if email is verified
-        if not user.email_verified:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Email not verified. Please check your inbox.",
-            )
+        # TEMPORARILY DISABLED: Check if email is verified
+        # Uncomment after configuring SMTP credentials
+        # if not user.email_verified:
+        #     raise HTTPException(
+        #         status_code=status.HTTP_403_FORBIDDEN,
+        #         detail="Email not verified. Please check your inbox.",
+        #     )
 
         # Create tokens
         token_payload = create_token_payload(user.id, user.email, user.tenant_id)
